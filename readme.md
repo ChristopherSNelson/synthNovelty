@@ -130,26 +130,44 @@ We use the USPTO-50K reaction dataset (pingzhili version) with a time-based spli
 - **Validation:** 2,267 reactions (Pre-2016)
 - **Test:** 27,277 reactions (2016)
 
-## Project Structure
+## Scoring Reactions and Routes
 
-```
-dataset_setup.py      # Downloads + preprocesses USPTO-50K
-precompute_routes.py  # Generates RXNFP embeddings per split
-model.py              # Conditional diffusion model architecture
-train.py              # Training loop with early stopping
-evaluate.py           # Novelty scoring + comparison plots
-demo.py               # Demo comparing common vs unusual reactions
-score_reaction.py     # Score individual reaction SMILES
-```
-
-## Scoring Individual Reactions
-
+### Individual Reactions
 ```bash
 # Score a single reaction
 python score_reaction.py "CC(=O)Cl.NCC>>CC(=O)NCC"
 
 # Score reactions from a file
 python score_reaction.py --file my_reactions.txt
+```
+
+### Multi-Step Routes
+The model supports scoring entire retrosynthetic routes (synthesis trees) by evaluating the "Strategic Novelty" of the transformation sequence.
+
+```bash
+# Score a route from a JSON file (supports Askcos/AiZynthFinder formats)
+python score_reaction.py --route route.json
+
+# Run the multi-step demo
+python route_demo.py
+```
+
+We provide several pooling metrics for routes:
+- **Max Novelty (Bottleneck)**: The score of the most unusual step in the route.
+- **Mean Novelty**: The average innovation level across all steps.
+
+## Project Structure
+
+```
+dataset_setup.py      # Downloads + preprocesses USPTO-50K (Time-Split)
+precompute_routes.py  # Generates RXNFP embeddings + class frequencies
+model.py              # Conditional diffusion model architecture
+train.py              # Training loop with early stopping
+evaluate.py           # Novelty scoring + time-split statistical analysis
+demo.py               # Demo comparing common vs unusual reactions
+route_scorer.py       # Core logic for multi-step route evaluation
+route_demo.py         # Demo for multi-step synthesis routes
+score_reaction.py     # CLI for scoring reactions, files, and routes
 ```
 
 ## Hyperparameters
@@ -175,7 +193,6 @@ The code automatically detects and uses:
 
 ## Limitations
 
-- Single-step reactions only (multi-route extension possible)
 - Approximate likelihood via score norm
 - USPTO data is patent-biased
 

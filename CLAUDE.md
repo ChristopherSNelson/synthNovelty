@@ -2,61 +2,44 @@
 
 ## What This Is
 
-A reaction-space novelty evaluator that scores chemical reactions based on how unusual their transformation patterns are. Uses conditional diffusion (DDPM) to model the density of RXNFP embeddings from USPTO-50K reactions.
+A reaction-space novelty evaluator that scores chemical reactions and multi-step retrosynthetic routes based on how unusual their transformation patterns are. Uses conditional diffusion (DDPM) to model the density of RXNFP embeddings from USPTO-50K reactions.
 
-**Key insight:** Novelty is measured in transformation space, not molecular structure space.
+**Key insight:** Novelty is measured in transformation space, not molecular structure space. Strategic innovation is captured via multi-step route scoring.
 
 ## Current State
 
 - **Working pipeline:** `dataset_setup.py` → `precompute_routes.py` → `train.py` → `evaluate.py`
-- **Demo works:** `python demo.py` shows common reactions score ~4, unusual ones score ~11
-- **Outputs:** CSV files with SMILES + novelty scores, comparison plots
-- **Hardware:** Supports CUDA, MPS (Apple Silicon), CPU
+- **Time-split Evaluation:** Trained on Pre-2016, tested on 2016 data. Test set shows significantly higher novelty (p=0.0418).
+- **Multi-step Routes:** `route_scorer.py` supports scoring entire synthesis trees/routes via JSON.
+- **Demos:** `demo.py` (single-step) and `route_demo.py` (multi-step) show clear differentiation.
+- **Hardware:** Supports CUDA, MPS (Apple Silicon), CPU.
 
 ## Architecture
 
-- `model.py`: `ConditionalScoreNet` (sinusoidal time embedding + 3-layer MLP) wrapped by `DiffusionModel`
-- Embeddings: 256-dim RXNFP vectors
-- Conditioning: log(frequency + 1) of crude reaction class (first 10 chars of SMILES)
-- Novelty score: L2 norm of predicted noise at t=0.5
+- `model.py`: `ConditionalScoreNet` (sinusoidal time embedding + 3-layer MLP) wrapped by `DiffusionModel`.
+- Embeddings: 256-dim RXNFP vectors.
+- Conditioning: log(frequency + 1) of 10 standard Schneider reaction classes.
+- Novelty score: L2 norm of predicted noise at t=0.5.
+- Route metrics: Mean and Max (bottleneck) novelty across steps.
 
-## Known Limitations
+## Recent Improvements
 
-1. **Random splits don't show novelty difference** - Train/val/test are randomly sampled from same distribution, so no significant difference in novelty scores between splits. Time-based splits would be more meaningful.
-
-2. **Crude reaction class** - Using first 10 chars of SMILES is a rough approximation. Could use actual reaction templates or atom-mapping based classification.
-
-3. **Single-step only** - Doesn't handle multi-step retrosynthetic routes.
-
-## Possible Next Steps
-
-### High Impact
-- **Time-split evaluation**: Train on pre-2015 reactions, test on post-2015. Should show test reactions have higher novelty. Requires dataset with timestamps.
-- **Score real novel drugs**: Get SMILES for recently approved drugs (2023+), synthesize their reaction routes, score against older drugs.
-
-### Medium Impact
-- **Better reaction classes**: Use reaction templates from RDChiral or atom-mapping instead of crude string prefix.
-- **Visualization**: t-SNE/UMAP of embeddings colored by novelty score.
-- **Baseline comparisons**: Compare against kNN density, GMM, isolation forest.
-
-### Lower Priority
-- Exact likelihood via probability flow ODE instead of score norm approximation
-- Web interface for scoring arbitrary reactions
-
-### Reach Goal
-- **Multi-step retrosynthetic routes**: Instead of scoring individual reactions, score entire synthesis trees. Would require: (1) retrosynthesis prediction model (e.g., from ASKCOS or similar), (2) route embedding strategy (aggregate/pool step embeddings, or graph neural network over route tree), (3) new training data with full routes. This would measure novelty of synthesis strategies, not just individual transformations.
+1.  **Time-split Dataset:** Transitioned to `pingzhili/uspto-50k` with patent IDs; created 2016 cutoff split.
+2.  **Standard Classes:** Replaced crude SMILES prefix hack with 10 standard reaction classes.
+3.  **Route Evaluation:** Added framework for scoring retrosynthesis trees from JSON.
 
 ## File Overview
 
 | File | Purpose |
 |------|---------|
-| `dataset_setup.py` | Downloads USPTO-50K from HuggingFace |
-| `precompute_routes.py` | Generates RXNFP embeddings, saves per-split |
+| `dataset_setup.py` | Downloads USPTO-50K and creates Time-Split |
+| `precompute_routes.py` | Generates RXNFP embeddings and class features |
 | `model.py` | Diffusion model architecture |
 | `train.py` | Training loop, saves model.pt + metrics.pt |
-| `evaluate.py` | Scores all splits, outputs CSVs + plots |
-| `demo.py` | Quick demo of common vs unusual reactions |
-| `score_reaction.py` | CLI to score individual reactions |
+| `evaluate.py` | Scores all splits, time-split statistical analysis |
+| `route_scorer.py` | Logic for multi-step synthesis route scoring |
+| `demo.py` / `route_demo.py` | Single-step and multi-step novelty demos |
+| `score_reaction.py` | CLI for reactions, files, and routes |
 
 ## Commands
 
@@ -64,13 +47,11 @@ A reaction-space novelty evaluator that scores chemical reactions based on how u
 # Full pipeline
 python dataset_setup.py && python precompute_routes.py && python train.py && python evaluate.py
 
-# Quick demo
+# Demos
 python demo.py
+python route_demo.py
 
-# Score a reaction
+# CLI Usage
 python score_reaction.py "CCBr.NC>>CCNC"
+python score_reaction.py --route route.json
 ```
-
-## Dependencies Note
-
-`rxnfp` has compatibility issues with newer transformers. We import only `RXNBERTFingerprintGenerator` and `get_default_model_and_tokenizer` from `rxnfp.transformer_fingerprints` - avoid importing from `rxnfp.models`.
