@@ -37,29 +37,27 @@ def main():
     rxnfp_generator = RXNBERTFingerprintGenerator(model, tokenizer)
 
     # Compute frequency features based on TRAINING set only
-    df_train['rxn_class'] = df_train['reaction_smiles'].str[:10]
-    class_counts = Counter(df_train['rxn_class'])
+    class_counts = Counter(df_train['class'])
 
     def compute_freq_features(df):
         df = df.copy()
-        df['rxn_class'] = df['reaction_smiles'].str[:10]
         freq_features = []
-        for cls in df['rxn_class']:
+        for cls in df['class']:
             freq = class_counts.get(cls, 0)  # 0 if not seen in training
             freq_features.append(np.log(freq + 1))
         return torch.tensor(freq_features, dtype=torch.float32).unsqueeze(1)
 
     # Generate embeddings for each split
     print("\nEmbedding training set...")
-    train_embeddings = embed_reactions(rxnfp_generator, df_train['reaction_smiles'].tolist())
+    train_embeddings = embed_reactions(rxnfp_generator, df_train['rxn_smiles'].tolist())
     train_freq = compute_freq_features(df_train)
 
     print("\nEmbedding validation set...")
-    val_embeddings = embed_reactions(rxnfp_generator, df_val['reaction_smiles'].tolist())
+    val_embeddings = embed_reactions(rxnfp_generator, df_val['rxn_smiles'].tolist())
     val_freq = compute_freq_features(df_val)
 
     print("\nEmbedding test set...")
-    test_embeddings = embed_reactions(rxnfp_generator, df_test['reaction_smiles'].tolist())
+    test_embeddings = embed_reactions(rxnfp_generator, df_test['rxn_smiles'].tolist())
     test_freq = compute_freq_features(df_test)
 
     # Save with split information
@@ -67,17 +65,17 @@ def main():
         "train": {
             "embeddings": train_embeddings,
             "freq_features": train_freq,
-            "smiles": df_train['reaction_smiles'].tolist()
+            "smiles": df_train['rxn_smiles'].tolist()
         },
         "val": {
             "embeddings": val_embeddings,
             "freq_features": val_freq,
-            "smiles": df_val['reaction_smiles'].tolist()
+            "smiles": df_val['rxn_smiles'].tolist()
         },
         "test": {
             "embeddings": test_embeddings,
             "freq_features": test_freq,
-            "smiles": df_test['reaction_smiles'].tolist()
+            "smiles": df_test['rxn_smiles'].tolist()
         }
     }, OUT_PATH)
 

@@ -33,25 +33,22 @@ def load_model():
     rxnfp_model, tokenizer = get_default_model_and_tokenizer()
     rxnfp_generator = RXNBERTFingerprintGenerator(rxnfp_model, tokenizer)
 
+    # Load training class frequencies for conditioning
     data = torch.load("data/route_embeddings.pt")
-    train_smiles = data["train"]["smiles"]
-    class_counts = Counter([s[:10] for s in train_smiles])
+    train_freq = data["train"]["freq_features"]
+    mean_freq = train_freq.mean().item()
 
-    return model, mean, std, rxnfp_generator, class_counts, device
+    return model, mean, std, rxnfp_generator, mean_freq, device
 
-def score_reactions(reactions, model, mean, std, rxnfp_generator, class_counts, device):
+def score_reactions(reactions, model, mean, std, rxnfp_generator, mean_freq, device):
     """Score a list of reaction SMILES."""
     embeddings = rxnfp_generator.convert_batch(reactions)
     X = torch.tensor(np.array(embeddings), dtype=torch.float32)
     # Normalize using stats on same device
     X = (X - mean.to(X.device)) / std.to(X.device)
 
-    freq_features = []
-    for rxn in reactions:
-        cls = rxn[:10]
-        freq = class_counts.get(cls, 0)
-        freq_features.append(np.log(freq + 1))
-    C = torch.tensor(freq_features, dtype=torch.float32).unsqueeze(1)
+    # Use mean training frequency as conditioning for unknown reactions
+    C = torch.ones((X.size(0), 1), dtype=torch.float32) * mean_freq
 
     X, C = X.to(device), C.to(device)
     t = torch.ones((X.size(0), 1), device=device) * 0.5
@@ -64,7 +61,7 @@ def score_reactions(reactions, model, mean, std, rxnfp_generator, class_counts, 
 
 def main():
     print("Loading model...")
-    model, mean, std, rxnfp_generator, class_counts, device = load_model()
+    model, mean, std, rxnfp_generator, mean_freq, device = load_model()
     print(f"Using device: {device}\n")
 
     # Load example reactions
@@ -90,8 +87,8 @@ def main():
     # Score reactions
     print("Scoring reactions...\n")
 
-    low_scores = score_reactions(low_novelty, model, mean, std, rxnfp_generator, class_counts, device)
-    high_scores = score_reactions(high_novelty, model, mean, std, rxnfp_generator, class_counts, device)
+    low_scores = score_reactions(low_novelty, model, mean, std, rxnfp_generator, mean_freq, device)
+    high_scores = score_reactions(high_novelty, model, mean, std, rxnfp_generator, mean_freq, device)
 
     # Display results
     print("="*70)

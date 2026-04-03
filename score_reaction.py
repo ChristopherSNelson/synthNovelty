@@ -42,13 +42,12 @@ def load_model():
 
     # Load training class frequencies for conditioning
     data = torch.load("data/route_embeddings.pt")
-    train_smiles = data["train"]["smiles"]
-    from collections import Counter
-    class_counts = Counter([s[:10] for s in train_smiles])
+    train_freq = data["train"]["freq_features"]
+    mean_freq = train_freq.mean().item()
 
-    return model, mean, std, rxnfp_generator, class_counts, device
+    return model, mean, std, rxnfp_generator, mean_freq, device
 
-def score_reactions(reactions, model, mean, std, rxnfp_generator, class_counts, device):
+def score_reactions(reactions, model, mean, std, rxnfp_generator, mean_freq, device):
     """Score a list of reaction SMILES."""
     # Generate embeddings
     embeddings = rxnfp_generator.convert_batch(reactions)
@@ -57,13 +56,8 @@ def score_reactions(reactions, model, mean, std, rxnfp_generator, class_counts, 
     # Normalize using stats on same device
     X = (X - mean.to(X.device)) / std.to(X.device)
 
-    # Compute frequency conditioning
-    freq_features = []
-    for rxn in reactions:
-        cls = rxn[:10]
-        freq = class_counts.get(cls, 0)
-        freq_features.append(np.log(freq + 1))
-    C = torch.tensor(freq_features, dtype=torch.float32).unsqueeze(1)
+    # Use mean training frequency as conditioning for unknown reactions
+    C = torch.ones((X.size(0), 1), dtype=torch.float32) * mean_freq
 
     # Score
     X, C = X.to(device), C.to(device)
@@ -86,7 +80,7 @@ def main():
         return
 
     print("Loading model...")
-    model, mean, std, rxnfp_generator, class_counts, device = load_model()
+    model, mean, std, rxnfp_generator, mean_freq, device = load_model()
 
     if args.file:
         with open(args.file) as f:
@@ -95,7 +89,7 @@ def main():
         reactions = [args.reaction]
 
     print(f"Scoring {len(reactions)} reaction(s)...")
-    scores = score_reactions(reactions, model, mean, std, rxnfp_generator, class_counts, device)
+    scores = score_reactions(reactions, model, mean, std, rxnfp_generator, mean_freq, device)
 
     print("\n" + "="*70)
     print("NOVELTY SCORES")
