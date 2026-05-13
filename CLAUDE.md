@@ -41,17 +41,34 @@ A reaction-space novelty evaluator that scores chemical reactions and multi-step
 | `demo.py` / `route_demo.py` | Single-step and multi-step novelty demos |
 | `score_reaction.py` | CLI for reactions, files, and routes |
 
+## Known Limitations
+
+- **Inference conditioning bug**: all new reactions receive `mean_freq` conditioning, making the conditioning branch useless at inference. Fix requires a reaction classifier at scoring time.
+- **demo.py is broken**: references `example_reactions.txt` which does not exist in the repo.
+- **Score formula**: `||predicted_noise||_2` is an empirical proxy, not a proper likelihood estimate.
+
+## Mistakes Log
+
+- Do not claim the conditioning is "class-aware" at inference - it always uses `mean_freq`.
+- Do not assume `demo.py` runs without `example_reactions.txt`.
+
 ## Commands
 
 ```bash
 # Full pipeline
 python dataset_setup.py && python precompute_routes.py && python train.py && python evaluate.py
 
-# Demos
-python demo.py
-python route_demo.py
+# Evaluation (now includes k-NN baseline, effect size CI, multi-t sweep)
+python evaluate.py
 
-# CLI Usage
+# Face-validity benchmark
+python benchmark.py
+
+# CLI Usage (single t or multi-t uncertainty)
 python score_reaction.py "CCBr.NC>>CCNC"
+python score_reaction.py --timesteps 0.3,0.5,0.7 "CCBr.NC>>CCNC"
 python score_reaction.py --route route.json
+
+# REST API (requires: pip install fastapi uvicorn)
+uvicorn api:app --reload --port 8000
 ```
