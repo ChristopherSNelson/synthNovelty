@@ -9,9 +9,20 @@
 - **`api.py`** (new): FastAPI REST server with `/health`, `/score`, and `/score_route` endpoints; model loaded at startup via lifespan event
 - **`README.md`**: Added ASCII retrosynthesis route diagram with per-step novelty scores showing what multi-step scoring looks like in practice; updated project structure table
 
+## FIRST THING TO DO
+
+**Run the full evaluation pipeline and check the k-NN baseline result:**
+
+```bash
+python evaluate.py
+python benchmark.py
+```
+
+The k-NN baseline comparison in `evaluate.py` is the most important outstanding question. If k-NN |r| >= diffusion |r|, the diffusion model is not adding value over a lookup table and the architecture needs rethinking. Read the output carefully before doing anything else.
+
 ## What's left / next steps (priority order)
 
-1. **Run evaluate.py and check k-NN baseline result** - This is the most important outstanding question. If k-NN |r| >= diffusion |r|, the diffusion model is not adding value over a lookup table. If true, need to investigate why (conditioning, architecture, score formula).
+1. **Run evaluate.py and benchmark.py** - see above.
 2. **Run benchmark.py** - Check face validity. If routine reactions don't score lower than novel ones, the mean_freq conditioning at inference is likely the culprit (see Known Limitations below).
 3. **Fix the inference-time conditioning bug** - Currently all scored reactions receive `mean_freq` as conditioning, making the conditioning branch useless at inference. Fix: use a reaction classifier (Schneider classifier or RXNFP-based) to assign the class at inference time, then look up the correct log-frequency. This is the highest-priority model improvement.
 4. **Fix demo.py** - It references `example_reactions.txt` which does not exist in the repo. The file needs to be created or the demo needs to be rewritten to use inline reactions.
