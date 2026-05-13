@@ -144,6 +144,37 @@ python score_reaction.py --file my_reactions.txt
 ### Multi-Step Routes
 The model supports scoring entire retrosynthetic routes (synthesis trees) by evaluating the "Strategic Novelty" of the transformation sequence.
 
+Retrosynthesis works backwards from a **target molecule**, breaking bonds to reveal simpler precursors at each step. Each disconnection is one reaction:
+
+```
+                         Target Molecule
+                                |
+               Step 3: Carbene cyclopropanation
+               Novelty: 8.4   *** HIGH ***
+                                |
+                         Intermediate B
+                       /                \
+     Step 2: Amide coupling         Step 1: CuAAC click
+     Novelty: 2.1   (low)           Novelty: 7.9   ** HIGH **
+              |                              |
+       Intermediate A                  Intermediate C
+       /           \                   /            \
+  Acid A         Amine B          Azide            Alkyne
+  (start)        (start)          (start)          (start)
+```
+
+**SynthNovelty scores each reaction step** and reports:
+
+| Metric | Value | Meaning |
+|---|---|---|
+| Step 1 novelty | 7.9 | CuAAC is unusual - rare in USPTO training data |
+| Step 2 novelty | 2.1 | Amide coupling is routine - high frequency |
+| Step 3 novelty | 8.4 | Cyclopropanation bottleneck - key innovation |
+| **Mean novelty** | **6.1** | Route is strategically creative overall |
+| **Max novelty** | **8.4** | The carbene step is the most innovative disconnection |
+
+A single high-scoring step signals where the real synthetic innovation lives.
+
 ```bash
 # Score a route from a JSON file (supports Askcos/AiZynthFinder formats)
 python score_reaction.py --route route.json
@@ -163,11 +194,13 @@ dataset_setup.py      # Downloads + preprocesses USPTO-50K (Time-Split)
 precompute_routes.py  # Generates RXNFP embeddings + class frequencies
 model.py              # Conditional diffusion model architecture
 train.py              # Training loop with early stopping
-evaluate.py           # Novelty scoring + time-split statistical analysis
+evaluate.py           # Novelty scoring + k-NN baseline + multi-t sweep
 demo.py               # Demo comparing common vs unusual reactions
 route_scorer.py       # Core logic for multi-step route evaluation
 route_demo.py         # Demo for multi-step synthesis routes
-score_reaction.py     # CLI for scoring reactions, files, and routes
+score_reaction.py     # CLI for scoring reactions, files, and routes (+ uncertainty)
+benchmark.py          # Curated face-validity benchmark (routine vs novel reactions)
+api.py                # FastAPI REST server
 ```
 
 ## Hyperparameters

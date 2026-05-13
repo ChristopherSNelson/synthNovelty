@@ -59,58 +59,89 @@ def load_model():
 
     return model, mean, std, rxnfp_generator, mean_freq, device
 
-def score_reactions(reactions, model, mean, std, rxnfp_generator, mean_freq, device):
-    """Score a list of reaction SMILES."""
+def score_reactions(reactions, model, mean, std, rxnfp_generator, mean_freq, device, timestep=0.5):
+    """Score a list of reaction SMILES at a single diffusion timestep."""
     if not reactions:
         return np.array([])
-        
-    # Generate embeddings
+
     embeddings = rxnfp_generator.convert_batch(reactions)
     X = torch.tensor(np.array(embeddings), dtype=torch.float32)
-
-    # Normalize using stats on same device
     X = (X - mean.to(X.device)) / std.to(X.device)
-
-    # Use mean training frequency as conditioning for unknown reactions
     C = torch.ones((X.size(0), 1), dtype=torch.float32) * mean_freq
-
-    # Score
     X, C = X.to(device), C.to(device)
-    t = torch.ones((X.size(0), 1), device=device) * 0.5
+    t = torch.ones((X.size(0), 1), device=device) * timestep
 
     with torch.no_grad():
-        score = model(X, t, C)
-        novelty = torch.norm(score, dim=1)
+        novelty = torch.norm(model(X, t, C), dim=1)
 
     return novelty.cpu().numpy()
+
+
+def score_reactions_multit(reactions, model, mean, std, rxnfp_generator, mean_freq, device,
+                           timesteps=(0.3, 0.5, 0.7)):
+    """Score reactions across multiple diffusion timesteps.
+
+    Returns (mean_scores, std_scores). The std across timesteps serves as a
+    rough uncertainty estimate - high std means the score is sensitive to the
+    timestep choice, which itself may indicate instability.
+
+    Note: this is NOT a Bayesian uncertainty - it is an ensemble heuristic.
+    """
+    if not reactions:
+        return np.array([]), np.array([])
+
+    embeddings = rxnfp_generator.convert_batch(reactions)
+    X = torch.tensor(np.array(embeddings), dtype=torch.float32)
+    X = (X - mean.to(X.device)) / std.to(X.device)
+    C = torch.ones((X.size(0), 1), dtype=torch.float32) * mean_freq
+    X, C = X.to(device), C.to(device)
+
+    all_scores = []
+    with torch.no_grad():
+        for t_val in timesteps:
+            t = torch.ones((X.size(0), 1), device=device) * t_val
+            novelty = torch.norm(model(X, t, C), dim=1).cpu().numpy()
+            all_scores.append(novelty)
+
+    arr = np.array(all_scores)  # (n_timesteps, n_reactions)
+    return arr.mean(axis=0), arr.std(axis=0)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Score reaction novelty")
     parser.add_argument("reaction", nargs="?", help="Reaction SMILES (reactants>>product)")
     parser.add_argument("--file", "-f", help="File with one reaction SMILES per line")
     parser.add_argument("--route", "-r", help="JSON file containing a retrosynthetic route/tree")
+    parser.add_argument(
+        "--timesteps", default="0.5",
+        help="Comma-separated diffusion timestep(s) for scoring (default: 0.5). "
+             "Multiple values (e.g. '0.3,0.5,0.7') average scores and report uncertainty."
+    )
     args = parser.parse_args()
 
     if not args.reaction and not args.file and not args.route:
         parser.print_help()
         return
 
+    timesteps = [float(t) for t in args.timesteps.split(",")]
+
     print("Loading model...")
     model, mean, std, rxnfp_generator, mean_freq, device = load_model()
 
     is_route = False
+    uncertainties = None
+
     if args.route:
         from route_scorer import RouteScorer
         with open(args.route) as f:
             tree_data = json.load(f)
-        
+
         scorer = RouteScorer()
         if isinstance(tree_data, list):
             results = scorer.score_route(tree_data)
             reactions = tree_data
         else:
             results = scorer.score_tree(tree_data)
-            # Re-extract for display
             reactions = []
             def _ext(n):
                 if isinstance(n, dict):
@@ -120,27 +151,40 @@ def main():
                 elif isinstance(n, list):
                     for i in n: _ext(i)
             _ext(tree_data)
-        
+
         scores = np.array(results["step_scores"])
         route_meta = results
         is_route = True
     elif args.file:
         with open(args.file) as f:
             reactions = [line.strip() for line in f if line.strip() and ">>" in line]
-        scores = score_reactions(reactions, model, mean, std, rxnfp_generator, mean_freq, device)
+        if len(timesteps) > 1:
+            scores, uncertainties = score_reactions_multit(
+                reactions, model, mean, std, rxnfp_generator, mean_freq, device, timesteps)
+        else:
+            scores = score_reactions(
+                reactions, model, mean, std, rxnfp_generator, mean_freq, device, timesteps[0])
     else:
         reactions = [args.reaction]
-        scores = score_reactions(reactions, model, mean, std, rxnfp_generator, mean_freq, device)
+        if len(timesteps) > 1:
+            scores, uncertainties = score_reactions_multit(
+                reactions, model, mean, std, rxnfp_generator, mean_freq, device, timesteps)
+        else:
+            scores = score_reactions(
+                reactions, model, mean, std, rxnfp_generator, mean_freq, device, timesteps[0])
 
     print("\n" + "="*70)
     print("NOVELTY SCORES")
     print("="*70)
     for i, (rxn, score) in enumerate(zip(reactions, scores)):
         label = f"Step {i+1}" if is_route else f"Reaction {i+1}"
-        # Truncate long SMILES for display
         display_rxn = rxn if len(rxn) < 60 else rxn[:57] + "..."
         print(f"\n{label}: {display_rxn}")
-        print(f"  Novelty: {score:.4f}")
+        if uncertainties is not None:
+            print(f"  Novelty: {score:.4f} +/- {uncertainties[i]:.4f}  "
+                  f"(mean over {len(timesteps)} timesteps: {args.timesteps})")
+        else:
+            print(f"  Novelty: {score:.4f}")
 
     if is_route:
         print("\n" + "="*70)
@@ -152,6 +196,8 @@ def main():
     elif len(reactions) > 1:
         print(f"\nMean novelty: {scores.mean():.4f}")
         print(f"Std novelty:  {scores.std():.4f}")
+        if uncertainties is not None:
+            print(f"Mean per-reaction uncertainty: {uncertainties.mean():.4f}")
 
 if __name__ == "__main__":
     main()
